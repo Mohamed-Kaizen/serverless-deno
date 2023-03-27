@@ -1,35 +1,71 @@
-import { Application, Router } from "https://deno.land/x/oak@v11.1.0/mod.ts";
+import { Application, Router } from "oak/mod.ts"
 
-import { PORT } from "./core/settings.ts";
-import { core_router } from "./core/functions.ts";
+import { PORT } from "core/settings.ts"
+import { restore } from "core/helper.ts"
+import { core_router } from "core/functions.ts"
 
+const app = new Application()
 
-const app = new Application();
+const router = new Router()
 
-const router = new Router();
+Deno.mkdirSync("./functions", { recursive: true })
 
-try {
-	Deno.mkdirSync("./functions");
-} catch {
-	// Do nothing
-}
+await restore()
 
-for await (const file of Deno.readDir("functions")) {
-	if (file.isFile) {
-		const name: string = file.name.split(".")[0];
+/**
+ * Load a function route
+ *
+ * @param name - The name of the function
+ *
+ * @param item - The file item
+ *
+ * @param sub_dir - Whether the function is in a sub directory
+ */
+async function load_fn_route(
+	name: string,
+	item: Deno.DirEntry,
+	sub_dir = false,
+) {
+	let fn
 
-		const { default: fn } = await import(`./functions/${name}.ts`);
+	if (sub_dir) {
+		const _default = await import(
+			`./functions/${item.name}/${name}.ts`
+		)
+		fn = _default.default
+	} else {
+		const _default = await import(`./functions/${name}.ts`)
+		fn = _default.default
+	}
 
-		router.all(`/${name}`, fn);
+	if (!sub_dir && fn && typeof fn === "function") router.all(`/${name}`, fn)
+	if (sub_dir && fn && typeof fn === "function") {
+		router.all(`/${item.name}/${name}`, fn)
 	}
 }
 
-router.use(core_router.routes());
+for await (const item of Deno.readDir("functions")) {
+	if (item.isFile) {
+		const name: string = item.name.split(".")[0]
 
-router.use(core_router.allowedMethods());
+		load_fn_route(name, item)
+	} else {
+		for await (const subitem of Deno.readDir(`functions/${item.name}`)) {
+			if (subitem.isFile) {
+				const name: string = subitem.name.split(".")[0]
 
-app.use(router.routes());
+				load_fn_route(name, item, true)
+			}
+		}
+	}
+}
 
-app.use(router.allowedMethods());
+router.use(core_router.routes())
 
-await app.listen({ port: PORT });
+router.use(core_router.allowedMethods())
+
+app.use(router.routes())
+
+app.use(router.allowedMethods())
+
+await app.listen({ port: PORT })

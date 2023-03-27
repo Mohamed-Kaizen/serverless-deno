@@ -6,9 +6,7 @@ RUN mkdir -p $APP_HOME
 
 WORKDIR $APP_HOME
 
-RUN deno install -qAf --unstable https://deno.land/x/denon/denon.ts
-
 COPY . $APP_HOME/
 
-CMD ["denon", "run", "--allow-all", "main.ts"]
+CMD ["deno", "task", "start"]
 

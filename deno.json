@@ -1,10 +1,22 @@
 {
+    "imports": {
+      "std/": "https://deno.land/std@0.181.0/",
+      "oak/": "https://deno.land/x/oak@v12.1.0/",
+      "dotenv/": "https://deno.land/x/dotenv@v3.2.2/",
+      "core/": "./core/"
+    },
+    "tasks": {
+      "dev": "deno run -A --watch=functions.toml,core/,functions/ main.ts",
+      "pre-start": "deno run --watch=functions.toml,core/,functions/ main.ts",
+      "start": "deno run -A --watch=functions.toml,core/,functions/ main.ts"
+    },
     "fmt": {
       "options": {
         "indentWidth": 4,
         "lineWidth": 80,
         "useTabs": true,
-        "singleQuote": false
+        "singleQuote": false,
+        "semiColons": false
       }
     }
   }

@@ -1,194 +1,225 @@
-import {
-	parse,
-	stringify,
-} from "https://deno.land/std@0.173.0/encoding/toml.ts";
+import { parse, stringify } from "std/encoding/toml.ts"
 
-import { Router } from "https://deno.land/x/oak@v11.1.0/mod.ts";
+import { Router } from "oak/mod.ts"
 
-import type { Context } from "https://deno.land/x/oak@v11.1.0/mod.ts";
+import { z } from "npm:zod"
 
-export const core_router = new Router();
+import type { Context } from "oak/mod.ts"
 
-core_router.prefix("/functions-management");
+import type { FunctionToml } from "core/types.ts"
 
-interface FunctionToml {
-	name: string;
+export const core_router = new Router()
 
-	code: string;
-}
+core_router.prefix("/functions-management")
+
+const schema = z.object({
+	name: z.string().min(1),
+	code: z.string().min(1),
+	folder: z.string().optional().default("root"),
+})
 
 core_router.post("/create", async ({ request, response }: Context) => {
-	const body = request?.body();
+	const body = request?.body()
 
 	if (body.type !== "json") {
-		response.status = 400;
-		response.body = "Invalid body type, expected JSON";
+		response.status = 400
+		response.body = "Invalid body type, expected JSON"
 	}
 
-	const data = await body.value;
+	const data = await body.value
 
-	if (!data.name) {
-		response.status = 400;
+	const result = schema.safeParse(data)
 
-		return response.body = "No name provided";
+	if (!result.success) {
+		response.status = 400
+		return response.body = result.error.issues
 	}
 
-	if (!data.code) {
-		response.status = 400;
-		return response.body = "No code provided";
+	const { name, code, folder } = result.data
+
+	const toml_result = await Deno.readTextFile("functions.toml")
+
+	const _toml = parse(toml_result)
+
+	const functions = _toml.functions as FunctionToml[] ?? []
+
+	if (
+		functions.find((fn: FunctionToml) =>
+			fn.name === name && fn.folder === folder
+		)
+	) {
+		response.status = 400
+		return response.body = "Function already exists"
 	}
 
-	const { name, code } = data;
+	functions.push({ name, folder, code })
 
-	const result = await Deno.readTextFile("functions.toml");
+	_toml.functions = functions
 
-	const _toml = parse(result);
+	Deno.writeTextFile("functions.toml", stringify(_toml))
 
-	const functions = _toml.functions as FunctionToml[] ?? [];
+	if (folder === "root") Deno.writeTextFile(`./functions/${name}.ts`, code)
+	else {
+		Deno.mkdirSync(`./functions/${folder}`, { recursive: true })
 
-	if (functions.find((fn: FunctionToml) => fn.name === name)) {
-		response.status = 400;
-		return response.body = "Function already exists";
+		Deno.writeTextFile(`./functions/${folder}/${name}.ts`, code)
 	}
 
-	functions.push({ name, code });
+	response.status = 200
 
-	_toml.functions = functions;
+	return response.body = "Function has been created"
+})
 
-	Deno.writeTextFile("functions.toml", stringify(_toml));
+core_router.get("/list", async ({ request, response }: Context) => {
+	const folder = request.url.searchParams.get("folder") ?? "all"
 
-	Deno.writeTextFile(`./functions/${name}.ts`, code);
+	const result = await Deno.readTextFile("functions.toml")
 
-	response.status = 200;
+	const _toml = parse(result)
 
-	return response.body = "Function has been created";
-});
+	const functions = _toml.functions as FunctionToml[]
 
-core_router.get("/list", async ({ response }: Context) => {
-	const result = await Deno.readTextFile("functions.toml");
-
-	const _toml = parse(result);
-
-	const functions = _toml.functions as FunctionToml[];
-
-	const _functions = [];
+	const _functions = []
 
 	for (const fn of functions) {
-		_functions.push(fn?.name);
+		if (folder === "all") _functions.push(fn?.name)
+
+		if (fn?.folder === folder) _functions.push(fn?.name)
 	}
 
-	response.status = 200;
+	response.status = 200
 
-	return response.body = _functions;
-});
+	return response.body = _functions
+})
 
-core_router.get("/get/:name", async ({ params, response }) => {
-	const { name } = params;
+core_router.get("/get/:name", async ({ params, request, response }) => {
+	const { name } = params
+
+	const folder = request.url.searchParams.get("folder") ?? "root"
+
+	const path = folder === "root"
+		? `./functions/${name}.ts`
+		: `./functions/${folder}/${name}.ts`
 
 	try {
-		const code = await Deno.readTextFile(`./functions/${name}.ts`);
+		const code = await Deno.readTextFile(path)
 
-		response.status = 200;
+		response.status = 200
 
-		return response.body = code;
+		return response.body = code
 	} catch {
-		response.status = 404;
+		response.status = 404
 
-		return response.body = "Function not found";
+		return response.body = "Function not found"
 	}
-});
+})
 
 core_router.post("/update", async ({ request, response }: Context) => {
-	const body = request?.body();
+	const body = request?.body()
 
 	if (body.type !== "json") {
-		response.status = 400;
-		response.body = "Invalid body type, expected JSON";
+		response.status = 400
+		response.body = "Invalid body type, expected JSON"
 	}
 
-	const data = await body.value;
+	const data = await body.value
 
-	if (!data.name) {
-		response.status = 400;
+	const result = schema.safeParse(data)
 
-		return response.body = "No name provided";
+	if (!result.success) {
+		response.status = 400
+		return response.body = result.error.issues
 	}
 
-	if (!data.code) {
-		response.status = 400;
-		return response.body = "No code provided";
-	}
+	const { name, code, folder } = result.data
 
-	const { name, code } = data;
+	const toml_result = await Deno.readTextFile("functions.toml")
 
-	const result = await Deno.readTextFile("functions.toml");
+	const _toml = parse(toml_result)
 
-	const _toml = parse(result);
+	const functions = _toml.functions as FunctionToml[] ?? []
 
-	const functions = _toml.functions as FunctionToml[] ?? [];
-
+	const path = folder === "root"
+		? `./functions/${name}.ts`
+		: `./functions/${folder}/${name}.ts`
+	console.log(path)
 	try {
-		await Deno.stat(`./functions/${name}.ts`);
+		await Deno.stat(path)
 	} catch {
-		response.status = 404;
-		return response.body = "Function not found";
+		response.status = 404
+		return response.body = "Function not found"
 	}
 
-	Deno.writeTextFile(`./functions/${name}.ts`, code);
+	Deno.writeTextFile(path, code)
 
 	for (const fn of functions) {
-		if (fn.name === name) {
-			fn.code = code;
+		if (fn.name === name && fn.folder === folder) {
+			fn.code = code
 		}
 	}
 
-	_toml.functions = functions;
+	_toml.functions = functions
 
-	Deno.writeTextFile("functions.toml", stringify(_toml));
+	Deno.writeTextFile("functions.toml", stringify(_toml))
 
-	response.status = 200;
+	response.status = 200
 
-	return response.body = "Function has been updated";
-});
+	return response.body = "Function has been updated"
+})
 
 core_router.post("/delete", async ({ request, response }: Context) => {
-	const body = request?.body();
+	const body = request?.body()
 
 	if (body.type !== "json") {
-		response.status = 400;
-		response.body = "Invalid body type, expected JSON";
+		response.status = 400
+		response.body = "Invalid body type, expected JSON"
 	}
 
-	const data = await body.value;
+	const data = await body.value
 
 	if (!data.name) {
-		response.status = 400;
+		response.status = 400
 
-		return response.body = "No name provided";
+		return response.body = "No name provided"
 	}
 
-	const { name } = data;
+	const { name, folder = "root" } = data
 
-	const result = await Deno.readTextFile("functions.toml");
+	const result = await Deno.readTextFile("functions.toml")
 
-	const _toml = parse(result);
+	const _toml = parse(result)
 
-	const functions = _toml.functions as FunctionToml[] ?? [];
+	const functions = _toml.functions as FunctionToml[] ?? []
+
+	const path = folder === "root"
+		? `./functions/${name}.ts`
+		: `./functions/${folder}/${name}.ts`
 
 	try {
-		await Deno.stat(`./functions/${name}.ts`);
+		await Deno.stat(path)
 	} catch {
-		response.status = 404;
-		return response.body = "Function not found";
+		response.status = 404
+		return response.body = "Function not found"
 	}
 
-	Deno.remove(`./functions/${name}.ts`);
+	Deno.remove(path)
 
-	_toml.functions = functions.filter((fn: FunctionToml) => fn.name !== name);
+	const non_folder_functions = functions.filter((fn: FunctionToml) =>
+		fn.folder !== folder
+	)
 
-	Deno.writeTextFile("functions.toml", stringify(_toml));
+	const folder_functions = functions.filter((fn: FunctionToml) => {
+		if (fn.folder === folder) {
+			if (fn.name === name) return false
+			else return true
+		} else return false
+	})
 
-	response.status = 200;
+	_toml.functions = [...non_folder_functions, ...folder_functions]
 
-	return response.body = "Function has been deleted";
-});
+	Deno.writeTextFile("functions.toml", stringify(_toml))
+
+	response.status = 200
+
+	return response.body = "Function has been deleted"
+})
